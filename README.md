@@ -1,7 +1,7 @@
 # ReportCraft
 
-*(Working name — see the naming analysis in [vision.md](vision.md); to
-be confirmed.)*
+Working name — see the naming analysis in [vision.md](vision.md); to be
+confirmed.
 
 A free, open-source business-intelligence studio — the clean-room,
 Rust-native alternative to **Microsoft Power BI** and **SAP Business

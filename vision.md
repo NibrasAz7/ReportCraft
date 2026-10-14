@@ -1,6 +1,6 @@
 # ReportCraft — Vision
 
-*(Working name — see "The name" below; final name to be confirmed.)*
+Working name — see "The name" below; final name to be confirmed.
 
 A free, open-source business-intelligence studio — the clean-room,
 Rust-native alternative to **Microsoft Power BI** and **SAP Business
