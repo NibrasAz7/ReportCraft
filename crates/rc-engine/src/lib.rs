@@ -47,6 +47,7 @@ pub struct CommandSpec {
 pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "engine.list", label: "List engine commands", params: "{}" },
     CommandSpec { id: "project.new", label: "Create a new ReportCraft project", params: "{title}" },
+    CommandSpec { id: "project.sample", label: "Load the Northwind star-schema BI sample", params: "{}" },
     CommandSpec { id: "project.open", label: "Open a .reportcraft JSON project file", params: "{path}" },
     CommandSpec { id: "project.save", label: "Save the project to a .reportcraft file", params: "{path}" },
     CommandSpec { id: "project.summary", label: "Summarize tables, relationships, measures, visuals", params: "{}" },
@@ -69,7 +70,15 @@ pub struct Session {
 
 impl Session {
     pub fn new() -> Self {
+        Session { project: ReportProject::sample_northwind() }
+    }
+
+    pub fn empty() -> Self {
         Session { project: ReportProject::new("Untitled Report") }
+    }
+
+    pub fn commands(&self) -> &'static [CommandSpec] {
+        COMMANDS
     }
 
     pub fn project(&self) -> &ReportProject {
@@ -86,6 +95,10 @@ impl Session {
                 let title = req_str(&params, "title")?;
                 self.project = ReportProject::new(title);
                 Ok(json!({"title": self.project.title}))
+            }
+            "project.sample" => {
+                self.project = ReportProject::sample_northwind();
+                Ok(json!({"title": self.project.title, "tables": self.project.tables.len(), "measures": self.project.measures.len()}))
             }
             "project.open" => {
                 let path = req_str(&params, "path")?;

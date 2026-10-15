@@ -1,0 +1,19 @@
+[package]
+name = "reportcraft"
+description = "ReportCraft Desktop Studio: Report Canvas, Data Grid, Star-Schema Model View, Slicers, and DAX Measure Bar (egui)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "reportcraft"
+path = "src/main.rs"
+
+[dependencies]
+rc-ui-egui = { path = "../../crates/ui-egui" }
+egui = "0.36"
+eframe = "0.36"
+serde_json.workspace = true

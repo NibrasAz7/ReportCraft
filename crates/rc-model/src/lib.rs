@@ -294,6 +294,90 @@ impl ReportProject {
         }
     }
 
+    /// Seeded Northwind star-schema BI project (`regions`, `products`, `orders`,
+    /// 2 star-schema relationships, 5 DAX-class measures, and 4 visuals).
+    pub fn sample_northwind() -> Self {
+        let mut proj = ReportProject::new("Northwind Global Revenue & Margin");
+        if let Ok(t) = Table::from_delimited("regions", "region_id,region_name,director\nR1,EMEA,Alice\nR2,AMER,Bob\nR3,APAC,Carol\n", ',') {
+            proj.add_table(t);
+        }
+        if let Ok(t) = Table::from_delimited(
+            "products",
+            "product_id,product_name,category\nP1,Cloud Enterprise,Cloud\nP2,Analytics Pro,Cloud\nP3,Desktop Workstation,On-Prem\n",
+            ',',
+        ) {
+            proj.add_table(t);
+        }
+        if let Ok(t) = Table::from_delimited(
+            "orders",
+            "order_id,region_id,product_id,quarter,units,revenue,cost\n\
+             1,R1,P1,Q1,12,24000,9000\n\
+             2,R1,P3,Q1,8,12000,7200\n\
+             3,R2,P1,Q1,20,40000,14000\n\
+             4,R2,P2,Q2,15,22500,8000\n\
+             5,R3,P1,Q2,10,20000,7500\n\
+             6,R1,P2,Q3,18,27000,9500\n\
+             7,R2,P3,Q3,14,21000,12600\n\
+             8,R3,P2,Q4,16,24000,8400\n\
+             9,R2,P1,Q4,25,50000,17500\n",
+            ',',
+        ) {
+            proj.add_table(t);
+        }
+        let _ = proj.add_relationship(Relationship {
+            from_table: "orders".into(),
+            from_column: "region_id".into(),
+            to_table: "regions".into(),
+            to_column: "region_id".into(),
+        });
+        let _ = proj.add_relationship(Relationship {
+            from_table: "orders".into(),
+            from_column: "product_id".into(),
+            to_table: "products".into(),
+            to_column: "product_id".into(),
+        });
+        for (name, expression, fmt) in [
+            ("Total Revenue", "SUM(orders[revenue])", Some("currency")),
+            ("Total Cost", "SUM(orders[cost])", Some("currency")),
+            ("Gross Profit", "[Total Revenue] - [Total Cost]", Some("currency")),
+            ("Gross Margin %", "DIVIDE([Gross Profit], [Total Revenue], 0)", Some("percent")),
+            ("Cloud Revenue", "CALCULATE([Total Revenue], products[category] = \"Cloud\")", Some("currency")),
+        ] {
+            let _ = proj.add_measure(Measure { name: name.into(), expression: expression.into(), format: fmt.map(String::from) });
+        }
+        proj.visuals = vec![
+            VisualSpec {
+                id: "kpi_rev".into(),
+                title: "Total Revenue".into(),
+                kind: VisualKind::KpiCard,
+                group_by: None,
+                measures: vec!["Total Revenue".into()],
+            },
+            VisualSpec {
+                id: "bar_region".into(),
+                title: "Revenue by Region".into(),
+                kind: VisualKind::Bar,
+                group_by: Some("regions[region_name]".into()),
+                measures: vec!["Total Revenue".into()],
+            },
+            VisualSpec {
+                id: "line_qtr".into(),
+                title: "Quarterly Revenue Trend".into(),
+                kind: VisualKind::Line,
+                group_by: Some("orders[quarter]".into()),
+                measures: vec!["Total Revenue".into()],
+            },
+            VisualSpec {
+                id: "tbl_perf".into(),
+                title: "Regional Profit & Margin".into(),
+                kind: VisualKind::Table,
+                group_by: Some("regions[region_name]".into()),
+                measures: vec!["Total Revenue".into(), "Gross Profit".into(), "Gross Margin %".into()],
+            },
+        ];
+        proj
+    }
+
     pub fn add_table(&mut self, table: Table) {
         self.tables.insert(table.name.clone(), table);
     }

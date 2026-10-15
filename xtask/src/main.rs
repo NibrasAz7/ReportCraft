@@ -51,7 +51,7 @@ fn layers() -> ExitCode {
             "rc-model" | "rc_model" => 0,
             "rc-render" | "rc_render" => 1,
             "rc-engine" | "rc_engine" => 5,
-            "rc-mcp" | "rc_mcp" | "ui-egui" | "rc_ui_egui" => 6,
+            "rc-mcp" | "rc_mcp" | "ui-egui" | "rc-ui-egui" | "rc_ui_egui" => 6,
             n if n.ends_with("-cli") || n == "reportcraft" || n == "reportcraft-web" => 7,
             _ => return None,
         })

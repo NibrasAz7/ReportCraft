@@ -29,6 +29,14 @@ fn run(args: &[String]) -> Result<String, String> {
     };
     match first {
         "--help" | "-h" | "help" => Ok(usage()),
+        "demo" => {
+            let mut s = Session::new();
+            let summary = s.execute("project.summary", json!({})).map_err(|e| e.to_string())?;
+            let by_region = s
+                .execute("model.query", json!({"group_by": "regions[region_name]", "measures": ["Total Revenue", "Gross Profit", "Gross Margin %"]}))
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string_pretty(&json!({"summary": summary, "regionalPerformance": by_region})).map_err(|e| e.to_string())
+        }
         "commands" => {
             let mut s = Session::new();
             let v = s.execute("engine.list", json!({})).map_err(|e| e.to_string())?;
@@ -53,9 +61,12 @@ fn run(args: &[String]) -> Result<String, String> {
             serde_json::to_string_pretty(&out).map_err(|e| e.to_string())
         }
         "export-svg" | "export-html" => {
-            let project_path = args.get(1).ok_or_else(|| format!("usage: reportcraft-cli {first} <project.reportcraft> [output]"))?;
             let mut s = Session::new();
-            s.execute("project.open", json!({"path": project_path})).map_err(|e| e.to_string())?;
+            if let Some(project_path) = args.get(1) {
+                if project_path != "demo" {
+                    s.execute("project.open", json!({"path": project_path})).map_err(|e| e.to_string())?;
+                }
+            }
             let cmd = if first == "export-svg" { "report.export_svg" } else { "report.export_html" };
             let params = match args.get(2) {
                 Some(out_path) => json!({"path": out_path}),
@@ -73,10 +84,11 @@ fn usage() -> String {
         "reportcraft-cli — Headless BI engine, report renderer, and MCP server",
         "",
         "USAGE:",
+        "  reportcraft-cli demo",
         "  reportcraft-cli commands",
         "  reportcraft-cli --cmd '<command-id> <json-params>'",
-        "  reportcraft-cli export-svg <project.reportcraft> [out.svg]",
-        "  reportcraft-cli export-html <project.reportcraft> [out.html]",
+        "  reportcraft-cli export-svg [project.reportcraft|demo] [out.svg]",
+        "  reportcraft-cli export-html [project.reportcraft|demo] [out.html]",
         "  reportcraft-cli mcp",
     ]
     .join("\n")
