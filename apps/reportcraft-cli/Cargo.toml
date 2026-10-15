@@ -1,0 +1,13 @@
+[package]
+name = "reportcraft-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rc-engine = { path = "../../crates/rc-engine" }
+rc-mcp = { path = "../../crates/rc-mcp" }
+serde_json.workspace = true
+
+[lints]
+workspace = true

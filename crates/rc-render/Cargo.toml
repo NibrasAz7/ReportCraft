@@ -1,0 +1,13 @@
+[package]
+name = "rc-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rc-model = { path = "../rc-model" }
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

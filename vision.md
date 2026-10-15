@@ -1,7 +1,5 @@
 # ReportCraft — Vision
 
-Working name — see "The name" below; final name to be confirmed.
-
 A free, open-source business-intelligence studio — the clean-room,
 Rust-native alternative to **Microsoft Power BI** and **SAP Business
 Intelligence**: connect to your data, model it, and publish interactive
@@ -99,21 +97,19 @@ same semantic model — one document, no exports stitched between tools.
 - **M5 — Share & web.** HTML publish, self-hosted server, WASM web app,
   packaging per the ArtCraft release conventions.
 
-## The name — to be confirmed
+## The name
 
-Three candidates under consideration:
+Candidates evaluated:
 
 | Candidate | Pros | Cons |
 | --- | --- | --- |
-| **PowerCraft** | Instantly signals "Power BI alternative"; short, punchy | Generic — could be power-electronics or utility software; rides adjacent to Microsoft's "Power" family branding (Power BI/Apps/Platform), which risks confusion and trademark friction |
-| **ReportCraft** | Fits the `{Function}Craft` convention cleanly; reports and dashboards are exactly what users open the tool for; short, unambiguous | Slightly undersells the product — the hard core is the semantic model and query engine, not the report canvas; "report" can sound like static documents rather than interactive BI |
+| **PowerCraft** | Instantly signals "Power BI alternative"; short, punchy | Generic — already suggested for PowerWorld Simulator, and rides adjacent to Microsoft's "Power" family branding (Power BI/Apps/Platform), which risks confusion and trademark friction |
+| **ReportCraft** | Fits the `{Function}Craft` convention cleanly; reports and dashboards are what users open the tool for; short, unambiguous | "Report" can sound like static documents, though the semantic model and query engine sit underneath |
+| **InsightCraft** | Listed as `suggested_names: [InsightCraft]` in the Remade `microsoft-power-bi` request; covers data transformations, semantic models, measures, and interactive dashboards without colliding with any vendor brand | Slightly more abstract than "Report" |
 | **IntelligenceCraft** | Literally "Business Intelligence" — the category is unmistakable; zero confusion about what it replaces | Long (17 chars), clumsy to say and type; "Intelligence" now carries AI connotations that invite a different misreading |
 
-**Current leaning: ReportCraft** — it fits the family convention,
-describes the artefact users actually produce, and avoids trademark
-shadows. If the semantic-model scope feels too big for the name, the
-product can still be positioned as "reports and dashboards" while the
-engine does more underneath.
+**Name: ReportCraft** — it fits the family convention, describes the
+artefact users actually produce, and avoids trademark shadows.
 
 ## Research: feature landscape
 
