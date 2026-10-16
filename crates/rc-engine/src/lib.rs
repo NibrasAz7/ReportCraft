@@ -4,7 +4,9 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing))]
 
 use std::fmt;
+use std::path::Path;
 
+use craft_atomic::atomic_write;
 use rc_model::{
     fold_to_sql, FilterPredicate, Measure, ModelError, Relationship, ReportProject, RlsRole, Table, TransformStep, VisualKind, VisualSpec,
 };
@@ -121,7 +123,7 @@ impl Session {
             "project.save" => {
                 let path = req_str(&params, "path")?;
                 let text = self.project.to_json_pretty()?;
-                std::fs::write(&path, &text).map_err(|e| EngineError::Io(e.to_string()))?;
+                atomic_write(Path::new(&path), text.as_bytes()).map_err(|e| EngineError::Io(e.to_string()))?;
                 Ok(json!({"saved": path, "bytes": text.len()}))
             }
             "project.summary" => {
@@ -172,7 +174,7 @@ impl Session {
                 let table = self.project.tables.get(&name).ok_or_else(|| ModelError::UnknownTable(name.clone()))?;
                 let out = table.to_json_records()?;
                 if let Some(path) = params.get("path").and_then(Value::as_str) {
-                    std::fs::write(path, &out).map_err(|e| EngineError::Io(e.to_string()))?;
+                    atomic_write(Path::new(path), out.as_bytes()).map_err(|e| EngineError::Io(e.to_string()))?;
                     Ok(json!({"path": path, "bytes": out.len()}))
                 } else {
                     Ok(json!({"json": out}))
@@ -283,7 +285,7 @@ impl Session {
             "interop.export_tmdl" => {
                 let tmdl = self.project.to_tmdl();
                 if let Some(path) = params.get("path").and_then(Value::as_str) {
-                    std::fs::write(path, &tmdl).map_err(|e| EngineError::Io(e.to_string()))?;
+                    atomic_write(Path::new(path), tmdl.as_bytes()).map_err(|e| EngineError::Io(e.to_string()))?;
                     Ok(json!({"path": path, "bytes": tmdl.len()}))
                 } else {
                     Ok(json!({"tmdl": tmdl}))
@@ -308,7 +310,7 @@ impl Session {
             "report.export_svg" => {
                 let svg = render_report_svg(&self.project)?;
                 if let Some(path) = params.get("path").and_then(Value::as_str) {
-                    std::fs::write(path, &svg).map_err(|e| EngineError::Io(e.to_string()))?;
+                    atomic_write(Path::new(path), svg.as_bytes()).map_err(|e| EngineError::Io(e.to_string()))?;
                     Ok(json!({"path": path, "bytes": svg.len()}))
                 } else {
                     Ok(json!({"svg": svg}))
@@ -317,7 +319,7 @@ impl Session {
             "report.export_html" => {
                 let html = render_report_html(&self.project)?;
                 if let Some(path) = params.get("path").and_then(Value::as_str) {
-                    std::fs::write(path, &html).map_err(|e| EngineError::Io(e.to_string()))?;
+                    atomic_write(Path::new(path), html.as_bytes()).map_err(|e| EngineError::Io(e.to_string()))?;
                     Ok(json!({"path": path, "bytes": html.len()}))
                 } else {
                     Ok(json!({"html": html}))
@@ -326,7 +328,7 @@ impl Session {
             "report.export_pdf" => {
                 let pdf = render_report_pdf(&self.project)?;
                 if let Some(path) = params.get("path").and_then(Value::as_str) {
-                    std::fs::write(path, &pdf).map_err(|e| EngineError::Io(e.to_string()))?;
+                    atomic_write(Path::new(path), &pdf).map_err(|e| EngineError::Io(e.to_string()))?;
                     Ok(json!({"path": path, "bytes": pdf.len()}))
                 } else {
                     Ok(json!({"bytes": pdf.len(), "header": "%PDF-1.4"}))

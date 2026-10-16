@@ -41,12 +41,15 @@ engineering conventions, not the suite's code.
   SAP BusinessObjects-style parameterized report bursting
   (`burst_report_html`).
 - **Desktop Studio, CLI & MCP (`rc-ui-egui`, `rc-engine`, `rc-mcp`, `apps/*`)**:
-  native `egui` Desktop Studio with **Report** (vector charts with
-  click-to-cross-filter, KPI cards, `fx` measure bar), **Data** (table
-  grid, calculated-column builder, live folded SQL preview), and **Model**
-  (star-schema relationships, measures, TMDL preview) views; 23 engine
-  commands reachable identically from Studio, TCP `--control PORT`,
-  `reportcraft-cli`, and `reportcraft-cli mcp`.
+  native `egui` Desktop Studio styled with `craft-ui` (`WidgetPalette`),
+  persistent `config.toml` preferences via `craft-settings` (`ReportPrefs`),
+  and crash-safe atomic file saves/exports via `craft-atomic` (`atomic_write`,
+  from [`storytold/craft-libs`](https://github.com/storytold/craft-libs));
+  **Report** (vector charts with click-to-cross-filter, KPI cards, `fx`
+  measure bar), **Data** (table grid, calculated-column builder, live folded
+  SQL preview), and **Model** (star-schema relationships, measures, TMDL
+  preview) views; 23 engine commands reachable identically from Studio, TCP
+  `--control PORT`, `reportcraft-cli`, and `reportcraft-cli mcp`.
 
 **Known limitations (not yet implemented):**
 

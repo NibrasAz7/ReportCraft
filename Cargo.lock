@@ -691,6 +691,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-atomic"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=457a078809690994b22debdffb703ff36d3129df#457a078809690994b22debdffb703ff36d3129df"
+dependencies = [
+ "rustix 1.1.5",
+]
+
+[[package]]
+name = "craft-settings"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=457a078809690994b22debdffb703ff36d3129df#457a078809690994b22debdffb703ff36d3129df"
+dependencies = [
+ "craft-atomic",
+ "dirs",
+ "serde",
+ "toml_edit",
+]
+
+[[package]]
+name = "craft-ui"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=457a078809690994b22debdffb703ff36d3129df#457a078809690994b22debdffb703ff36d3129df"
+dependencies = [
+ "egui",
+ "serde",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -716,6 +744,27 @@ name = "cursor-icon"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
+
+[[package]]
+name = "dirs"
+version = "7.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d57d423b3c82e89b9a24ca3091fee61f456a26edbd28d26c65906f4bc1dcd8f"
+dependencies = [
+ "dirs-sys",
+]
+
+[[package]]
+name = "dirs-sys"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e01a3366d27ee9890022452ee61b2b63a67e6f13f58900b651ff5665f0bb1fab"
+dependencies = [
+ "libc",
+ "option-ext",
+ "redox_users",
+ "windows-sys 0.59.0",
+]
 
 [[package]]
 name = "dispatch"
@@ -2193,6 +2242,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
+name = "option-ext"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
+
+[[package]]
 name = "orbclient"
 version = "0.3.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2536,6 +2591,7 @@ dependencies = [
 name = "rc-engine"
 version = "0.1.0"
 dependencies = [
+ "craft-atomic",
  "rc-model",
  "rc-render",
  "serde",
@@ -2573,12 +2629,16 @@ name = "rc-ui-egui"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "craft-atomic",
+ "craft-settings",
+ "craft-ui",
  "eframe",
  "egui",
  "png",
  "rc-engine",
  "rc-model",
  "rc-render",
+ "serde",
  "serde_json",
 ]
 
@@ -2618,6 +2678,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "737970939a87c6fa31e7acad13307bccbb017a073b695b6089a2c484f929e20e"
 dependencies = [
  "bitflags 2.13.2",
+]
+
+[[package]]
+name = "redox_users"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60dc65c0ff1a7ae1294b0c67b9f14baf70b644404010370171787bfac1038fc0"
+dependencies = [
+ "libredox",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2796,6 +2866,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "serde_spanned"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e7523beb55eece201a2356bee0bbca0d1ab466c14c07703b2e0ee6d42cb0c2c"
+dependencies = [
+ "serde_core",
 ]
 
 [[package]]
@@ -3141,8 +3220,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3641d5bbb5349a79e1020a242d251efbc546ad8048d133958323ce9c40a9c9c"
 dependencies = [
  "indexmap",
+ "serde_core",
+ "serde_spanned",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 
@@ -3154,6 +3236,12 @@ checksum = "baa693a8032d7e1cada7d0041e96126df243179ff061456783ac7f12bda4744c"
 dependencies = [
  "winnow",
 ]
+
+[[package]]
+name = "toml_writer"
+version = "1.1.3+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06bdbd8cfc056b8d2e2e85f29b56a3bdbecb527cef81eb39e3e7b98af4652770"
 
 [[package]]
 name = "tracing"

@@ -14,14 +14,60 @@
 
 pub mod control;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 
 use base64::Engine as _;
 use control::ControlRequest;
+use craft_atomic::atomic_write;
+use craft_settings::{DocumentMut, Location, MigrateError, Settings, SettingsStore};
+use craft_ui::theme::WidgetPalette;
 use rc_engine::Session;
 use rc_model::{fold_to_sql, FilterOp, QueryResult, TransformStep, VisualKind};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as Json};
+
+#[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
+#[serde(default)]
+pub struct GeneralPrefs {
+    pub default_view: String,
+    pub default_region_slicer: String,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
+#[serde(default)]
+pub struct AppearancePrefs {
+    pub theme: String,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
+#[serde(default)]
+pub struct ReportPrefs {
+    pub general: GeneralPrefs,
+    pub appearance: AppearancePrefs,
+}
+
+impl Settings for ReportPrefs {
+    const APP_ID: &'static str = "reportcraft";
+    const SCHEMA_VERSION: u32 = 1;
+
+    fn migrate(_from: u32, _doc: &mut DocumentMut) -> Result<(), MigrateError> {
+        Ok(())
+    }
+}
+
+pub fn apply_craft_theme(ctx: &egui::Context) {
+    let mut visuals = egui::Visuals::dark();
+    let palette = WidgetPalette {
+        noninteractive: egui::Color32::from_rgb(20, 26, 36),
+        inactive: egui::Color32::from_rgb(30, 41, 59),
+        hovered: egui::Color32::from_rgb(51, 65, 85),
+        active: egui::Color32::from_rgb(37, 99, 235),
+        open: egui::Color32::from_rgb(30, 58, 138),
+    };
+    palette.apply_to(&mut visuals.widgets, egui::CornerRadius::same(4), egui::Stroke::new(1.0, egui::Color32::from_rgb(226, 232, 240)));
+    ctx.set_visuals(visuals);
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StudioView {
@@ -48,6 +94,7 @@ pub struct ReportAppOptions {
 
 pub struct ReportApp {
     pub session: Session,
+    pub settings: SettingsStore<ReportPrefs>,
     pub active_view: StudioView,
     pub selected_table: String,
     pub measure_name_input: String,
@@ -62,11 +109,13 @@ pub struct ReportApp {
 }
 
 impl ReportApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>, opts: ReportAppOptions) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, opts: ReportAppOptions) -> Self {
+        apply_craft_theme(&cc.egui_ctx);
         Self::with_options(opts)
     }
 
     pub fn with_options(opts: ReportAppOptions) -> Self {
+        let (settings, _report) = SettingsStore::<ReportPrefs>::open(Location::Memory);
         let mut session = Session::new();
         let mut status_line = String::from("Loaded Northwind Global Revenue & Margin star-schema model");
         if let Some(p) = &opts.startup_file {
@@ -86,6 +135,7 @@ impl ReportApp {
 
         ReportApp {
             session,
+            settings,
             active_view: StudioView::Report,
             selected_table: "orders".to_string(),
             measure_name_input: "Net Profit (SUMX)".to_string(),
@@ -155,7 +205,7 @@ impl ReportApp {
             let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
             let mut out = json!({"ok": true, "width": w, "height": h, "bytes": png_bytes.len(), "pngBase64": b64});
             if let Some(p) = path {
-                match std::fs::write(&p, &png_bytes) {
+                match atomic_write(Path::new(&p), &png_bytes) {
                     Ok(()) => out["path"] = json!(p),
                     Err(e) => out = json!({"ok": false, "error": format!("write {p}: {e}")}),
                 }
@@ -171,6 +221,8 @@ impl ReportApp {
             for v in [StudioView::Report, StudioView::Data, StudioView::Model] {
                 if ui.selectable_label(self.active_view == v, v.label()).clicked() {
                     self.active_view = v;
+                    let lbl = v.label().to_string();
+                    self.settings.update(|p| p.general.default_view = lbl);
                 }
             }
             ui.separator();
@@ -178,6 +230,8 @@ impl ReportApp {
             for reg in ["ALL", "EMEA", "AMER", "APAC"] {
                 if ui.selectable_label(self.active_region_slicer == reg, reg).clicked() {
                     self.active_region_slicer = reg.to_string();
+                    let reg_owned = reg.to_string();
+                    self.settings.update(|p| p.general.default_region_slicer = reg_owned);
                     let allowed: Vec<&str> = if reg == "ALL" { Vec::new() } else { vec![reg] };
                     let _ = self.exec_command("slicer.set", json!({"table": "regions", "column": "region_name", "allowed": allowed}));
                 }

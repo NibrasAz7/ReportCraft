@@ -16,8 +16,12 @@ path = "src/lib.rs"
 rc-model = { path = "../rc-model" }
 rc-render = { path = "../rc-render" }
 rc-engine = { path = "../rc-engine" }
+craft-atomic.workspace = true
+craft-settings.workspace = true
+craft-ui.workspace = true
 egui = "0.36"
 eframe = "0.36"
+serde.workspace = true
 serde_json.workspace = true
 png = "0.18"
 base64 = "0.22"

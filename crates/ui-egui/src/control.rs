@@ -111,7 +111,7 @@ pub fn handle(app: &mut ReportApp, ctx: &egui::Context, req: ControlRequest) {
                 "svg": svg,
             });
             if let Some(p) = &path {
-                match std::fs::write(p, out["svg"].as_str().unwrap_or_default()) {
+                match craft_atomic::atomic_write(std::path::Path::new(p), out["svg"].as_str().unwrap_or_default().as_bytes()) {
                     Ok(()) => out["path"] = json!(p),
                     Err(e) => out = json!({"ok": false, "error": format!("cannot write {p}: {e}")}),
                 }
