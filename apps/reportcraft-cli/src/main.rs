@@ -60,14 +60,19 @@ fn run(args: &[String]) -> Result<String, String> {
             let out = s.execute(id, params).map_err(|e| e.to_string())?;
             serde_json::to_string_pretty(&out).map_err(|e| e.to_string())
         }
-        "export-svg" | "export-html" => {
+        "export-svg" | "export-html" | "export-pdf" | "export-tmdl" => {
             let mut s = Session::new();
             if let Some(project_path) = args.get(1) {
                 if project_path != "demo" {
                     s.execute("project.open", json!({"path": project_path})).map_err(|e| e.to_string())?;
                 }
             }
-            let cmd = if first == "export-svg" { "report.export_svg" } else { "report.export_html" };
+            let cmd = match first {
+                "export-svg" => "report.export_svg",
+                "export-html" => "report.export_html",
+                "export-pdf" => "report.export_pdf",
+                _ => "interop.export_tmdl",
+            };
             let params = match args.get(2) {
                 Some(out_path) => json!({"path": out_path}),
                 None => json!({}),
@@ -89,6 +94,8 @@ fn usage() -> String {
         "  reportcraft-cli --cmd '<command-id> <json-params>'",
         "  reportcraft-cli export-svg [project.reportcraft|demo] [out.svg]",
         "  reportcraft-cli export-html [project.reportcraft|demo] [out.html]",
+        "  reportcraft-cli export-pdf [project.reportcraft|demo] [out.pdf]",
+        "  reportcraft-cli export-tmdl [project.reportcraft|demo] [out.tmdl]",
         "  reportcraft-cli mcp",
     ]
     .join("\n")

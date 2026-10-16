@@ -9,6 +9,11 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+pub mod tmdl;
+pub mod transform;
+
+pub use transform::{eval_row_formula, fold_to_sql, FilterOp, TransformStep};
+
 pub const MAX_ROWS: usize = 500_000;
 pub const MAX_COLS: usize = 1_024;
 pub const MAX_EXPR_DEPTH: usize = 32;
@@ -234,9 +239,14 @@ pub struct Measure {
 pub enum VisualKind {
     Bar,
     Line,
+    Area,
+    Scatter,
     Pie,
+    Treemap,
+    Gauge,
     KpiCard,
     Table,
+    Matrix,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -248,11 +258,18 @@ pub struct VisualSpec {
     pub measures: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FilterPredicate {
     pub table: String,
     pub column: String,
     pub allowed: Vec<String>,
+}
+
+/// Row-Level Security (RLS) role restricting table visibility per identity/role.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RlsRole {
+    pub name: String,
+    pub filters: Vec<FilterPredicate>,
 }
 
 /// Query result for a visual or tabular query.
@@ -279,6 +296,8 @@ pub struct ReportProject {
     pub measures: BTreeMap<String, Measure>,
     pub visuals: Vec<VisualSpec>,
     pub slicers: Vec<FilterPredicate>,
+    #[serde(default)]
+    pub rls_roles: Vec<RlsRole>,
 }
 
 impl ReportProject {
@@ -291,6 +310,7 @@ impl ReportProject {
             measures: BTreeMap::new(),
             visuals: Vec::new(),
             slicers: Vec::new(),
+            rls_roles: Vec::new(),
         }
     }
 
@@ -403,6 +423,29 @@ impl ReportProject {
         let _ = parse_measure_expr(&measure.expression)?;
         self.measures.insert(measure.name.clone(), measure);
         Ok(())
+    }
+
+    pub fn add_rls_role(&mut self, role: RlsRole) {
+        self.rls_roles.retain(|r| !r.name.eq_ignore_ascii_case(&role.name));
+        self.rls_roles.push(role);
+    }
+
+    pub fn evaluate_measure_as_role(&self, name: &str, role_name: &str) -> Result<f64, ModelError> {
+        let role = self
+            .rls_roles
+            .iter()
+            .find(|r| r.name.eq_ignore_ascii_case(role_name))
+            .ok_or_else(|| ModelError::MeasureSyntax(format!("unknown RLS role '{role_name}'")))?;
+        self.evaluate_measure(name, &role.filters)
+    }
+
+    pub fn query_as_role(&self, group_by: Option<&str>, measure_names: &[String], role_name: &str) -> Result<QueryResult, ModelError> {
+        let role = self
+            .rls_roles
+            .iter()
+            .find(|r| r.name.eq_ignore_ascii_case(role_name))
+            .ok_or_else(|| ModelError::MeasureSyntax(format!("unknown RLS role '{role_name}'")))?;
+        self.query(group_by, measure_names, &role.filters)
     }
 
     pub fn set_slicer(&mut self, table: &str, column: &str, allowed: Vec<String>) -> Result<(), ModelError> {
@@ -589,6 +632,39 @@ impl ReportProject {
                 }
                 self.eval_expr(inner, &next_filters, depth + 1)
             }
+            MeasureExpr::Iter { func, table, row_formula } => {
+                let t = self.tables.get(table).ok_or_else(|| ModelError::UnknownTable(table.clone()))?;
+                let rows = self.matching_rows(table, filters)?;
+                if rows.is_empty() {
+                    return Ok(0.0);
+                }
+                let mut vals = Vec::with_capacity(rows.len());
+                for r in rows {
+                    vals.push(eval_row_formula(t, r, row_formula)?);
+                }
+                Ok(match func {
+                    AggFunc::Sum => vals.iter().sum(),
+                    AggFunc::Average => vals.iter().sum::<f64>() / (vals.len() as f64),
+                    AggFunc::Min => vals.into_iter().fold(f64::INFINITY, f64::min),
+                    AggFunc::Max => vals.into_iter().fold(f64::NEG_INFINITY, f64::max),
+                    AggFunc::Count | AggFunc::DistinctCount => vals.len() as f64,
+                })
+            }
+            MeasureExpr::TotalYtd { inner, table, column, cutoff } => {
+                let t = self.tables.get(table).ok_or_else(|| ModelError::UnknownTable(table.clone()))?;
+                let col = t.column(column).ok_or_else(|| ModelError::UnknownColumn { table: table.clone(), column: column.clone() })?;
+                let mut allowed_periods = BTreeSet::new();
+                for v in &col.values {
+                    let k = v.display_key();
+                    if k.as_str() <= cutoff.as_str() {
+                        allowed_periods.insert(k);
+                    }
+                }
+                let mut next_filters = filters.to_vec();
+                next_filters.retain(|f| !(f.table == *table && f.column.eq_ignore_ascii_case(column)));
+                next_filters.push(FilterPredicate { table: table.clone(), column: column.clone(), allowed: allowed_periods.into_iter().collect() });
+                self.eval_expr(inner, &next_filters, depth + 1)
+            }
         }
     }
 
@@ -692,6 +768,8 @@ enum MeasureExpr {
     Number(f64),
     Ref(String),
     Agg { func: AggFunc, table: String, column: String },
+    Iter { func: AggFunc, table: String, row_formula: String },
+    TotalYtd { inner: Box<MeasureExpr>, table: String, column: String, cutoff: String },
     Divide { num: Box<MeasureExpr>, den: Box<MeasureExpr>, alt: f64 },
     Binary { op: BinOp, lhs: Box<MeasureExpr>, rhs: Box<MeasureExpr> },
     Calculate { inner: Box<MeasureExpr>, overrides: Vec<FilterPredicate> },
@@ -782,6 +860,33 @@ fn parse_measure_expr(raw: &str) -> Result<MeasureExpr, ModelError> {
                 overrides.push(parse_calculate_filter(filter_arg)?);
             }
             Ok(MeasureExpr::Calculate { inner: Box::new(inner), overrides })
+        }
+        "SUMX" | "AVERAGEX" | "MINX" | "MAXX" | "COUNTX" => {
+            if args.len() != 2 {
+                return Err(ModelError::MeasureSyntax(format!("{fn_name} expects 2 arguments (table, row_expression)")));
+            }
+            let table = args.first().map_or("", String::as_str).trim().to_string();
+            let row_formula = args.get(1).map_or("", String::as_str).trim().to_string();
+            if table.is_empty() || row_formula.is_empty() {
+                return Err(ModelError::MeasureSyntax(format!("{fn_name} requires non-empty table and expression")));
+            }
+            let func = match fn_name.as_str() {
+                "SUMX" => AggFunc::Sum,
+                "AVERAGEX" => AggFunc::Average,
+                "MINX" => AggFunc::Min,
+                "MAXX" => AggFunc::Max,
+                _ => AggFunc::Count,
+            };
+            Ok(MeasureExpr::Iter { func, table, row_formula })
+        }
+        "TOTALYTD" => {
+            if args.len() < 2 || args.len() > 3 {
+                return Err(ModelError::MeasureSyntax("TOTALYTD expects (measure_expr, table[period_col], [cutoff])".into()));
+            }
+            let inner = parse_measure_expr(args.first().map_or("", String::as_str))?;
+            let (table, column) = parse_table_col(args.get(1).map_or("", String::as_str))?;
+            let cutoff = args.get(2).map_or("Q4", String::as_str).trim().trim_matches('"').trim_matches('\'').to_string();
+            Ok(MeasureExpr::TotalYtd { inner: Box::new(inner), table, column, cutoff })
         }
         _ => Err(ModelError::MeasureSyntax(format!("unknown function '{fn_name}'"))),
     }
@@ -954,5 +1059,53 @@ mod tests {
         let json = proj.to_json_pretty().unwrap();
         let restored = ReportProject::from_json(&json).unwrap();
         assert_eq!(proj, restored);
+    }
+
+    #[test]
+    fn sumx_totalytd_rls_tmdl_and_query_folding() {
+        let mut proj = ReportProject::sample_northwind();
+        proj.add_measure(Measure {
+            name: "Net Profit (SUMX)".into(),
+            expression: "SUMX(orders, orders[revenue] - orders[cost])".into(),
+            format: Some("currency".into()),
+        })
+        .unwrap();
+        proj.add_measure(Measure {
+            name: "YTD Q2 Revenue".into(),
+            expression: "TOTALYTD([Total Revenue], orders[quarter], \"Q2\")".into(),
+            format: Some("currency".into()),
+        })
+        .unwrap();
+
+        assert_eq!(proj.evaluate_measure("Net Profit (SUMX)", &[]).unwrap(), 146800.0);
+        // Q1 (24000+12000+40000=76000) + Q2 (22500+20000=42500) = 118500
+        assert_eq!(proj.evaluate_measure("YTD Q2 Revenue", &[]).unwrap(), 118500.0);
+
+        // Row-Level Security role restricting to EMEA
+        proj.add_rls_role(RlsRole {
+            name: "EMEA_Viewer".into(),
+            filters: vec![FilterPredicate { table: "regions".into(), column: "region_name".into(), allowed: vec!["EMEA".into()] }],
+        });
+        assert_eq!(proj.evaluate_measure_as_role("Total Revenue", "EMEA_Viewer").unwrap(), 63000.0);
+
+        // TMDL roundtrip
+        let tmdl = proj.to_tmdl();
+        let parsed = ReportProject::from_tmdl("Restored", &tmdl).unwrap();
+        assert_eq!(parsed.tables.len(), 3);
+        assert_eq!(parsed.relationships.len(), 2);
+        assert!(parsed.measures.contains_key("Net Profit (SUMX)"));
+        assert_eq!(parsed.rls_roles.len(), 1);
+
+        // Power Query transform + SQL query folding
+        let steps = vec![
+            TransformStep::SelectColumns { columns: vec!["region_id".into(), "revenue".into(), "cost".into()] },
+            TransformStep::AddCalculatedColumn { name: "margin".into(), formula: "orders[revenue] - orders[cost]".into() },
+            TransformStep::FilterRows { column: "revenue".into(), op: FilterOp::Ge, value: "20000".into() },
+        ];
+        let sql = fold_to_sql("orders", &steps);
+        assert_eq!(
+            sql,
+            "SELECT \"region_id\", \"revenue\", \"cost\", (\"revenue\" - \"cost\") AS \"margin\" FROM \"orders\" WHERE \"revenue\" >= 20000"
+        );
     }
 }

@@ -2,11 +2,12 @@
 //!
 //! Three Power BI-class workspaces over one semantic model:
 //! - **Report**: interactive slicer bar (`regions[region_name]`, `orders[quarter]`),
-//!   DAX-class measure formula bar, KPI cards, and chart/table visual tiles.
-//! - **Data**: tabular grid explorer over every imported table (`regions`,
-//!   `products`, `orders`).
-//! - **Model**: star-schema relationship diagram (`from_table[fk] -> to_table[pk]`)
-//!   and measure dictionary.
+//!   DAX-class measure formula bar, KPI cards, and vector chart/table visual
+//!   tiles with click-to-cross-filter.
+//! - **Data**: tabular grid explorer + Power Query step transform builder &
+//!   live SQL query-folding preview.
+//! - **Model**: star-schema relationship diagram (`from_table[fk] -> to_table[pk]`),
+//!   Row-Level Security (RLS) role tester, and TMDL preview.
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing))]
@@ -19,7 +20,7 @@ use std::sync::mpsc::Receiver;
 use base64::Engine as _;
 use control::ControlRequest;
 use rc_engine::Session;
-use rc_model::VisualKind;
+use rc_model::{fold_to_sql, FilterOp, QueryResult, TransformStep, VisualKind};
 use serde_json::{json, Value as Json};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +52,9 @@ pub struct ReportApp {
     pub selected_table: String,
     pub measure_name_input: String,
     pub measure_expr_input: String,
+    pub calc_col_name: String,
+    pub calc_col_formula: String,
+    pub folded_sql_preview: String,
     pub active_region_slicer: String,
     pub status_line: String,
     control_rx: Option<Receiver<ControlRequest>>,
@@ -71,12 +75,24 @@ impl ReportApp {
                 Err(e) => status_line = format!("Open error: {e}"),
             }
         }
+        let default_steps = vec![
+            TransformStep::SelectColumns {
+                columns: vec!["region_id".into(), "product_id".into(), "quarter".into(), "revenue".into(), "cost".into()],
+            },
+            TransformStep::AddCalculatedColumn { name: "net_margin".into(), formula: "orders[revenue] - orders[cost]".into() },
+            TransformStep::FilterRows { column: "revenue".into(), op: FilterOp::Ge, value: "12000".into() },
+        ];
+        let folded_sql_preview = fold_to_sql("orders", &default_steps);
+
         ReportApp {
             session,
             active_view: StudioView::Report,
             selected_table: "orders".to_string(),
-            measure_name_input: "Avg Deal Size".to_string(),
-            measure_expr_input: "AVERAGE(orders[revenue])".to_string(),
+            measure_name_input: "Net Profit (SUMX)".to_string(),
+            measure_expr_input: "SUMX(orders, orders[revenue] - orders[cost])".to_string(),
+            calc_col_name: "net_margin".to_string(),
+            calc_col_formula: "orders[revenue] - orders[cost]".to_string(),
+            folded_sql_preview,
             active_region_slicer: "ALL".to_string(),
             status_line,
             control_rx: opts.control_rx,
@@ -179,7 +195,7 @@ impl ReportApp {
             ui.label("fx Measure:");
             ui.add(egui::TextEdit::singleline(&mut self.measure_name_input).desired_width(140.0));
             ui.label("=");
-            ui.add(egui::TextEdit::singleline(&mut self.measure_expr_input).desired_width(340.0));
+            ui.add(egui::TextEdit::singleline(&mut self.measure_expr_input).desired_width(360.0));
             if ui.button("Define Measure").clicked() {
                 let name = self.measure_name_input.trim().to_string();
                 let expr = self.measure_expr_input.trim().to_string();
@@ -188,48 +204,68 @@ impl ReportApp {
         });
     }
 
-    fn draw_report_view(&self, ui: &mut egui::Ui) {
-        let proj = self.session.project();
-        ui.horizontal_wrapped(|ui| {
-            for (name, m) in &proj.measures {
-                let val = proj.evaluate_measure(name, &[]).unwrap_or(0.0);
-                egui::Frame::group(ui.style()).show(ui, |ui| {
-                    ui.set_min_width(165.0);
-                    ui.label(egui::RichText::new(name).small().weak());
-                    let formatted = if m.format.as_deref() == Some("percent") { format!("{:.1}%", val * 100.0) } else { format!("{:.2}", val) };
-                    ui.heading(formatted);
-                    ui.label(egui::RichText::new(&m.expression).monospace().small());
-                });
-            }
-        });
-        ui.add_space(10.0);
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for v in &proj.visuals {
-                if matches!(v.kind, VisualKind::KpiCard) {
-                    continue;
+    fn draw_report_view(&mut self, ui: &mut egui::Ui) {
+        let mut clicked_region: Option<String> = None;
+        {
+            let proj = self.session.project();
+            ui.horizontal_wrapped(|ui| {
+                for (name, m) in &proj.measures {
+                    let val = proj.evaluate_measure(name, &[]).unwrap_or(0.0);
+                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                        ui.set_min_width(165.0);
+                        ui.label(egui::RichText::new(name).small().weak());
+                        let formatted = if m.format.as_deref() == Some("percent") { format!("{:.1}%", val * 100.0) } else { format!("{:.2}", val) };
+                        ui.heading(formatted);
+                        ui.label(egui::RichText::new(&m.expression).monospace().small());
+                    });
                 }
-                egui::Frame::group(ui.style()).show(ui, |ui| {
-                    ui.heading(&v.title);
-                    if let Ok(q) = proj.query(v.group_by.as_deref(), &v.measures, &[]) {
-                        egui::Grid::new(&v.id).striped(true).min_col_width(120.0).show(ui, |ui| {
-                            ui.strong(q.group_column.as_deref().unwrap_or("Group"));
-                            for m in &q.measure_names {
-                                ui.strong(m);
-                            }
-                            ui.end_row();
-                            for row in &q.rows {
-                                ui.label(&row.group_key);
-                                for val in &row.values {
-                                    ui.monospace(format!("{val:.2}"));
-                                }
-                                ui.end_row();
-                            }
-                        });
+            });
+            ui.add_space(10.0);
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                for v in &proj.visuals {
+                    if matches!(v.kind, VisualKind::KpiCard) {
+                        continue;
                     }
-                });
-                ui.add_space(8.0);
+                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                        ui.heading(&v.title);
+                        if let Ok(q) = proj.query(v.group_by.as_deref(), &v.measures, &[]) {
+                            if matches!(v.kind, VisualKind::Bar | VisualKind::Line | VisualKind::Area) {
+                                if let Some(hit) = draw_vector_chart(ui, v.kind, &q) {
+                                    if v.group_by.as_deref() == Some("regions[region_name]") {
+                                        clicked_region = Some(hit);
+                                    }
+                                }
+                            } else {
+                                egui::Grid::new(&v.id).striped(true).min_col_width(120.0).show(ui, |ui| {
+                                    ui.strong(q.group_column.as_deref().unwrap_or("Group"));
+                                    for m in &q.measure_names {
+                                        ui.strong(m);
+                                    }
+                                    ui.end_row();
+                                    for row in &q.rows {
+                                        ui.label(&row.group_key);
+                                        for val in &row.values {
+                                            ui.monospace(format!("{val:.2}"));
+                                        }
+                                        ui.end_row();
+                                    }
+                                });
+                            }
+                        }
+                    });
+                    ui.add_space(8.0);
+                }
+            });
+        }
+        if let Some(reg) = clicked_region {
+            if self.active_region_slicer == reg {
+                self.active_region_slicer = "ALL".to_string();
+                let _ = self.exec_command("slicer.set", json!({"table": "regions", "column": "region_name", "allowed": []}));
+            } else {
+                self.active_region_slicer = reg.clone();
+                let _ = self.exec_command("slicer.set", json!({"table": "regions", "column": "region_name", "allowed": [reg]}));
             }
-        });
+        }
     }
 
     fn draw_data_view(&mut self, ui: &mut egui::Ui) {
@@ -241,6 +277,30 @@ impl ReportApp {
                     self.selected_table = tname.clone();
                 }
             }
+            ui.separator();
+            ui.label("Calculated Column:");
+            ui.add(egui::TextEdit::singleline(&mut self.calc_col_name).desired_width(100.0));
+            ui.label("=");
+            ui.add(egui::TextEdit::singleline(&mut self.calc_col_formula).desired_width(220.0));
+            if ui.button("+ Add Column & Fold SQL").clicked() {
+                let tbl = self.selected_table.clone();
+                let cname = self.calc_col_name.trim().to_string();
+                let formula = self.calc_col_formula.trim().to_string();
+                let reply = self.exec_command(
+                    "table.transform",
+                    json!({
+                        "name": tbl,
+                        "steps": [{"step": "add_calculated_column", "name": cname, "formula": formula}]
+                    }),
+                );
+                if let Some(sql) = reply.pointer("/result/foldedSql").and_then(Json::as_str) {
+                    self.folded_sql_preview = sql.to_string();
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.strong("Folded Native SQL:");
+            ui.monospace(&self.folded_sql_preview);
         });
         ui.separator();
         if let Some(table) = self.session.project().tables.get(&self.selected_table) {
@@ -293,7 +353,95 @@ impl ReportApp {
                 ui.end_row();
             }
         });
+        ui.add_space(16.0);
+        ui.heading("Power BI TMDL Definition Preview");
+        let tmdl = proj.to_tmdl();
+        egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+            ui.monospace(tmdl);
+        });
     }
+}
+
+fn draw_vector_chart(ui: &mut egui::Ui, kind: VisualKind, q: &QueryResult) -> Option<String> {
+    let mut clicked_group: Option<String> = None;
+    let desired = egui::vec2(ui.available_width().max(320.0), 170.0);
+    let (rect, response) = ui.allocate_exact_size(desired, egui::Sense::click());
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(18, 24, 34));
+
+    let pad_l = 44.0_f32;
+    let pad_r = 20.0_f32;
+    let pad_t = 18.0_f32;
+    let pad_b = 28.0_f32;
+    let plot_w = (rect.width() - pad_l - pad_r).max(40.0);
+    let plot_h = (rect.height() - pad_t - pad_b).max(40.0);
+    let max_v = q.rows.iter().filter_map(|r| r.values.first().copied()).fold(0.0_f64, f64::max).max(1.0) as f32;
+    let n = q.rows.len().max(1);
+
+    if matches!(kind, VisualKind::Bar) {
+        let slot_w = plot_w / (n as f32);
+        let bar_w = (slot_w * 0.58).max(12.0);
+        for (i, row) in q.rows.iter().enumerate() {
+            let v = row.values.first().copied().unwrap_or(0.0).max(0.0) as f32;
+            let bh = (v / max_v) * plot_h;
+            let bx = rect.min.x + pad_l + (i as f32) * slot_w + (slot_w - bar_w) * 0.5;
+            let by = rect.min.y + pad_t + plot_h - bh;
+            let bar_rect = egui::Rect::from_min_size(egui::pos2(bx, by), egui::vec2(bar_w, bh));
+            painter.rect_filled(bar_rect, 3.0, egui::Color32::from_rgb(37, 99, 235));
+            painter.text(
+                egui::pos2(bx + bar_w * 0.5, rect.min.y + pad_t + plot_h + 6.0),
+                egui::Align2::CENTER_TOP,
+                &row.group_key,
+                egui::FontId::proportional(11.5),
+                egui::Color32::from_rgb(203, 213, 225),
+            );
+            painter.text(
+                egui::pos2(bx + bar_w * 0.5, (by - 12.0).max(rect.min.y + 2.0)),
+                egui::Align2::CENTER_TOP,
+                format!("{v:.0}"),
+                egui::FontId::monospace(10.5),
+                egui::Color32::from_rgb(148, 163, 184),
+            );
+            if response.clicked() {
+                if let Some(pos) = response.interact_pointer_pos() {
+                    if bar_rect.expand(4.0).contains(pos) {
+                        clicked_group = Some(row.group_key.clone());
+                    }
+                }
+            }
+        }
+    } else {
+        let mut pts = Vec::with_capacity(n);
+        for (i, row) in q.rows.iter().enumerate() {
+            let v = row.values.first().copied().unwrap_or(0.0).max(0.0) as f32;
+            let x = if n == 1 { rect.min.x + pad_l + plot_w * 0.5 } else { rect.min.x + pad_l + (i as f32 / (n - 1) as f32) * plot_w };
+            let y = rect.min.y + pad_t + plot_h - (v / max_v) * plot_h;
+            pts.push((egui::pos2(x, y), &row.group_key, v));
+        }
+        for pair in pts.windows(2) {
+            if let [(p1, _, _), (p2, _, _)] = pair {
+                painter.line_segment([*p1, *p2], egui::Stroke::new(2.2, egui::Color32::from_rgb(13, 148, 136)));
+            }
+        }
+        for (pt, label, v) in pts {
+            painter.circle_filled(pt, 4.0, egui::Color32::from_rgb(45, 212, 191));
+            painter.text(
+                egui::pos2(pt.x, rect.min.y + pad_t + plot_h + 6.0),
+                egui::Align2::CENTER_TOP,
+                label,
+                egui::FontId::proportional(11.5),
+                egui::Color32::from_rgb(203, 213, 225),
+            );
+            painter.text(
+                egui::pos2(pt.x, (pt.y - 14.0).max(rect.min.y + 2.0)),
+                egui::Align2::CENTER_TOP,
+                format!("{v:.0}"),
+                egui::FontId::monospace(10.5),
+                egui::Color32::from_rgb(148, 163, 184),
+            );
+        }
+    }
+    clicked_group
 }
 
 impl eframe::App for ReportApp {

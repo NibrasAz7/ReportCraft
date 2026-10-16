@@ -6,6 +6,10 @@
 
 use rc_model::{ModelError, QueryResult, ReportProject, VisualKind, VisualSpec};
 
+pub mod pdf;
+
+pub use pdf::{burst_report_html, render_report_pdf};
+
 const PALETTE: &[&str] = &["#2563eb", "#0d9488", "#d97706", "#7c3aed", "#dc2626", "#059669"];
 
 pub fn render_visual_svg(spec: &VisualSpec, result: &QueryResult, width: u32, height: u32) -> String {
@@ -18,11 +22,11 @@ pub fn render_visual_svg(spec: &VisualSpec, result: &QueryResult, width: u32, he
     svg.push_str(&format!(r##"<text x="16" y="28" font-size="14" font-weight="600" fill="#0f172a">{}</text>"##, escape_xml(&spec.title)));
 
     match spec.kind {
-        VisualKind::KpiCard => render_kpi_body(&mut svg, result, w, h),
-        VisualKind::Bar => render_bar_body(&mut svg, result, w, h),
-        VisualKind::Line => render_line_body(&mut svg, result, w, h),
+        VisualKind::KpiCard | VisualKind::Gauge => render_kpi_body(&mut svg, result, w, h),
+        VisualKind::Bar | VisualKind::Treemap => render_bar_body(&mut svg, result, w, h),
+        VisualKind::Line | VisualKind::Area | VisualKind::Scatter => render_line_body(&mut svg, result, w, h),
         VisualKind::Pie => render_pie_body(&mut svg, result, w, h),
-        VisualKind::Table => render_table_body(&mut svg, result, w, h),
+        VisualKind::Table | VisualKind::Matrix => render_table_body(&mut svg, result, w, h),
     }
 
     svg.push_str("</svg>");
@@ -269,5 +273,14 @@ mod tests {
         let html = render_report_html(&p).unwrap();
         assert!(html.contains("<!DOCTYPE html>"));
         assert!(html.contains("Q4 Sales Report"));
+
+        let pdf = render_report_pdf(&p).unwrap();
+        assert!(pdf.starts_with(b"%PDF-1.4\n"));
+        assert!(pdf.ends_with(b"%%EOF\n"));
+
+        let bursted = burst_report_html(&p, "sales[region]").unwrap();
+        assert_eq!(bursted.len(), 2);
+        assert!(bursted.contains_key("EMEA"));
+        assert!(bursted.contains_key("AMER"));
     }
 }

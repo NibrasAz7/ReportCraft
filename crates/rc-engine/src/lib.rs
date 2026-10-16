@@ -5,8 +5,10 @@
 
 use std::fmt;
 
-use rc_model::{Measure, ModelError, Relationship, ReportProject, Table, VisualKind, VisualSpec};
-use rc_render::{render_report_html, render_report_svg};
+use rc_model::{
+    fold_to_sql, FilterPredicate, Measure, ModelError, Relationship, ReportProject, RlsRole, Table, TransformStep, VisualKind, VisualSpec,
+};
+use rc_render::{burst_report_html, render_report_html, render_report_pdf, render_report_svg};
 use serde_json::{json, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,15 +54,25 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "project.save", label: "Save the project to a .reportcraft file", params: "{path}" },
     CommandSpec { id: "project.summary", label: "Summarize tables, relationships, measures, visuals", params: "{}" },
     CommandSpec { id: "table.import_csv", label: "Import CSV/TSV text or file into a table", params: "{name, text?, path?, delimiter?}" },
+    CommandSpec { id: "table.import_json", label: "Import JSON array of objects into a table", params: "{name, text?, path?}" },
+    CommandSpec { id: "table.export_json", label: "Export a table as a JSON array of objects", params: "{name, path?}" },
+    CommandSpec { id: "table.transform", label: "Apply Power Query transform steps and fold to SQL", params: "{name, steps: [..]}" },
+    CommandSpec { id: "table.fold_sql", label: "Fold Power Query transform steps into a native SQL SELECT", params: "{name, steps: [..]}" },
     CommandSpec { id: "table.list", label: "List tables and row/column counts", params: "{}" },
     CommandSpec { id: "model.relate", label: "Add a star-schema relationship", params: "{from_table, from_column, to_table, to_column}" },
     CommandSpec { id: "model.add_measure", label: "Define or replace a DAX-class measure", params: "{name, expression, format?}" },
     CommandSpec { id: "model.eval_measure", label: "Evaluate a measure in the current slicer context", params: "{name}" },
+    CommandSpec { id: "model.add_rls_role", label: "Define a Row-Level Security (RLS) role", params: "{name, table, column, allowed: [..]}" },
+    CommandSpec { id: "model.eval_as_role", label: "Evaluate a measure under an RLS role", params: "{measure, role}" },
     CommandSpec { id: "model.query", label: "Run a grouped visual query", params: "{group_by?, measures: [..]}" },
     CommandSpec { id: "slicer.set", label: "Set or clear a slicer on table[column]", params: "{table, column, allowed: [..]}" },
     CommandSpec { id: "visual.add", label: "Add a visual to the report canvas", params: "{id, title, kind, group_by?, measures: [..]}" },
+    CommandSpec { id: "interop.export_tmdl", label: "Export semantic model as Power BI TMDL", params: "{path?}" },
+    CommandSpec { id: "interop.import_tmdl", label: "Import semantic model from Power BI TMDL", params: "{title?, text?, path?}" },
     CommandSpec { id: "report.export_svg", label: "Render the report to SVG (and optionally write to path)", params: "{path?}" },
     CommandSpec { id: "report.export_html", label: "Render standalone interactive HTML (and optionally write to path)", params: "{path?}" },
+    CommandSpec { id: "report.export_pdf", label: "Render multi-page paginated PDF 1.4 report", params: "{path?}" },
+    CommandSpec { id: "report.burst_html", label: "Burst parameterized HTML reports across a dimension", params: "{dimension}" },
 ];
 
 #[derive(Default)]
@@ -123,6 +135,7 @@ impl Session {
                     "measures": measures,
                     "visuals": self.project.visuals.len(),
                     "slicers": self.project.slicers.len(),
+                    "rlsRoles": self.project.rls_roles.len(),
                 }))
             }
             "table.import_csv" => {
@@ -139,6 +152,49 @@ impl Session {
                 let cols = table.columns.len();
                 self.project.add_table(table);
                 Ok(json!({"table": name, "rows": rows, "columns": cols}))
+            }
+            "table.import_json" => {
+                let name = req_str(&params, "name")?;
+                let json_text = if let Some(inline) = params.get("text").and_then(Value::as_str) {
+                    inline.to_string()
+                } else {
+                    let path = req_str(&params, "path")?;
+                    std::fs::read_to_string(&path).map_err(|e| EngineError::Io(e.to_string()))?
+                };
+                let table = Table::from_json_records(&name, &json_text)?;
+                let rows = table.row_count();
+                let cols = table.columns.len();
+                self.project.add_table(table);
+                Ok(json!({"table": name, "rows": rows, "columns": cols}))
+            }
+            "table.export_json" => {
+                let name = req_str(&params, "name")?;
+                let table = self.project.tables.get(&name).ok_or_else(|| ModelError::UnknownTable(name.clone()))?;
+                let out = table.to_json_records()?;
+                if let Some(path) = params.get("path").and_then(Value::as_str) {
+                    std::fs::write(path, &out).map_err(|e| EngineError::Io(e.to_string()))?;
+                    Ok(json!({"path": path, "bytes": out.len()}))
+                } else {
+                    Ok(json!({"json": out}))
+                }
+            }
+            "table.transform" => {
+                let name = req_str(&params, "name")?;
+                let steps_val = params.get("steps").cloned().ok_or_else(|| EngineError::MissingParam("steps".into()))?;
+                let steps: Vec<TransformStep> =
+                    serde_json::from_value(steps_val).map_err(|e| EngineError::InvalidParam(format!("invalid transform steps: {e}")))?;
+                let sql = fold_to_sql(&name, &steps);
+                let table = self.project.tables.get_mut(&name).ok_or_else(|| ModelError::UnknownTable(name.clone()))?;
+                table.apply_steps(&steps)?;
+                Ok(json!({"table": name, "rows": table.row_count(), "columns": table.columns.len(), "foldedSql": sql}))
+            }
+            "table.fold_sql" => {
+                let name = req_str(&params, "name")?;
+                let steps_val = params.get("steps").cloned().ok_or_else(|| EngineError::MissingParam("steps".into()))?;
+                let steps: Vec<TransformStep> =
+                    serde_json::from_value(steps_val).map_err(|e| EngineError::InvalidParam(format!("invalid transform steps: {e}")))?;
+                let sql = fold_to_sql(&name, &steps);
+                Ok(json!({"table": name, "foldedSql": sql}))
             }
             "table.list" => {
                 let list: Vec<Value> = self
@@ -174,6 +230,20 @@ impl Session {
                 let value = self.project.evaluate_measure(&name, &[])?;
                 Ok(json!({"measure": name, "value": value}))
             }
+            "model.add_rls_role" => {
+                let name = req_str(&params, "name")?;
+                let table = req_str(&params, "table")?;
+                let column = req_str(&params, "column")?;
+                let allowed = req_str_array(&params, "allowed")?;
+                self.project.add_rls_role(RlsRole { name: name.clone(), filters: vec![FilterPredicate { table, column, allowed }] });
+                Ok(json!({"role": name, "rlsRoles": self.project.rls_roles.len()}))
+            }
+            "model.eval_as_role" => {
+                let measure = req_str(&params, "measure")?;
+                let role = req_str(&params, "role")?;
+                let value = self.project.evaluate_measure_as_role(&measure, &role)?;
+                Ok(json!({"measure": measure, "role": role, "value": value}))
+            }
             "model.query" => {
                 let group_by = params.get("group_by").and_then(Value::as_str);
                 let measures = req_str_array(&params, "measures")?;
@@ -194,9 +264,14 @@ impl Session {
                 let kind = match kind_str.as_str() {
                     "bar" => VisualKind::Bar,
                     "line" => VisualKind::Line,
+                    "area" => VisualKind::Area,
+                    "scatter" => VisualKind::Scatter,
                     "pie" => VisualKind::Pie,
+                    "treemap" => VisualKind::Treemap,
+                    "gauge" => VisualKind::Gauge,
                     "kpi" | "kpi_card" => VisualKind::KpiCard,
                     "table" => VisualKind::Table,
+                    "matrix" => VisualKind::Matrix,
                     other => return Err(EngineError::InvalidParam(format!("unknown visual kind '{other}'"))),
                 };
                 let group_by = params.get("group_by").and_then(Value::as_str).map(String::from);
@@ -204,6 +279,31 @@ impl Session {
                 self.project.visuals.retain(|v| v.id != id);
                 self.project.visuals.push(VisualSpec { id: id.clone(), title, kind, group_by, measures });
                 Ok(json!({"visual": id, "count": self.project.visuals.len()}))
+            }
+            "interop.export_tmdl" => {
+                let tmdl = self.project.to_tmdl();
+                if let Some(path) = params.get("path").and_then(Value::as_str) {
+                    std::fs::write(path, &tmdl).map_err(|e| EngineError::Io(e.to_string()))?;
+                    Ok(json!({"path": path, "bytes": tmdl.len()}))
+                } else {
+                    Ok(json!({"tmdl": tmdl}))
+                }
+            }
+            "interop.import_tmdl" => {
+                let title = params.get("title").and_then(Value::as_str).unwrap_or("Imported TMDL Model");
+                let text = if let Some(inline) = params.get("text").and_then(Value::as_str) {
+                    inline.to_string()
+                } else {
+                    let path = req_str(&params, "path")?;
+                    std::fs::read_to_string(&path).map_err(|e| EngineError::Io(e.to_string()))?
+                };
+                self.project = ReportProject::from_tmdl(title, &text)?;
+                Ok(json!({
+                    "title": self.project.title,
+                    "tables": self.project.tables.len(),
+                    "measures": self.project.measures.len(),
+                    "relationships": self.project.relationships.len(),
+                }))
             }
             "report.export_svg" => {
                 let svg = render_report_svg(&self.project)?;
@@ -222,6 +322,21 @@ impl Session {
                 } else {
                     Ok(json!({"html": html}))
                 }
+            }
+            "report.export_pdf" => {
+                let pdf = render_report_pdf(&self.project)?;
+                if let Some(path) = params.get("path").and_then(Value::as_str) {
+                    std::fs::write(path, &pdf).map_err(|e| EngineError::Io(e.to_string()))?;
+                    Ok(json!({"path": path, "bytes": pdf.len()}))
+                } else {
+                    Ok(json!({"bytes": pdf.len(), "header": "%PDF-1.4"}))
+                }
+            }
+            "report.burst_html" => {
+                let dimension = req_str(&params, "dimension")?;
+                let bursted = burst_report_html(&self.project, &dimension)?;
+                let keys: Vec<String> = bursted.keys().cloned().collect();
+                Ok(json!({"dimension": dimension, "slices": keys, "count": keys.len()}))
             }
             other => Err(EngineError::UnknownCommand(other.to_string())),
         }
@@ -276,5 +391,11 @@ mod tests {
 
         let svg = s.execute("report.export_svg", json!({})).unwrap();
         assert!(svg["svg"].as_str().unwrap().contains("Sales by Region"));
+
+        let pdf = s.execute("report.export_pdf", json!({})).unwrap();
+        assert_eq!(pdf["header"], "%PDF-1.4");
+
+        let tmdl = s.execute("interop.export_tmdl", json!({})).unwrap();
+        assert!(tmdl["tmdl"].as_str().unwrap().contains("measure 'Total Sales'"));
     }
 }
