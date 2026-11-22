@@ -1,5 +1,10 @@
 # ReportCraft Roadmap
 
+> Scope: dashboards, reports, visuals and the semantic model. ReportCraft
+> is not a SQL IDE or general-purpose query editor — where deep query
+> tooling is needed, the direction is interop with dedicated data tools
+> rather than feature duplication.
+
 ## Current stage: Alpha (M0–M4 core vertical slice landed)
 
 - [x] **M0 — Columnar Engine & Project Format (`rc-model`)**: typed columns (`Int`, `Float`, `Text`, `Bool`, `Null`), CSV/TSV/JSON ingestion and export, allocation bounds, deterministic `.reportcraft` JSON serialization, and built-in Northwind star-schema sample.
@@ -11,3 +16,4 @@
 ## Next milestones
 
 - [ ] **M5 — Live Database Drivers, Server & Web**: live wire-protocol connectors (PostgreSQL, SQL Server, SQLite), Excel `.xlsx`/Parquet binary readers, WASM browser build, and optional single-binary `reportcraft-server`.
+  - Connector priority is demand-driven (community asks): SQL Server, then PostgreSQL/MySQL, SQLite and Excel/CSV; cloud sources (Google Sheets, REST) after.

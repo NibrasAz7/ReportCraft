@@ -14,6 +14,11 @@ MCP.
 Built the [ArtCraft](https://github.com/storytold) way — the suite's
 engineering conventions, not the suite's code.
 
+ReportCraft is a BI studio: dashboards, reports, visuals and the semantic
+model underneath them. It is not a SQL IDE or a general-purpose query
+editor — where deep database tooling is needed, the direction is interop
+with dedicated data tools rather than feature duplication.
+
 ## Status: Alpha (M0–M4 vertical slice)
 
 **What works today:**
